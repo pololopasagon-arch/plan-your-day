@@ -292,7 +292,7 @@ function compute(A, cfg) {
     deadline: cfg.deadline, libClose: dn10(cfg.libClose), minBlock: cfg.minBlock,
     lateEnd: cfg.lateEnd == null ? 1080 : cfg.lateEnd
   };
-  var gym = !!A.gym, gymMin = r10(A.gymMin || 90), T = c.transition;
+  var gym = !!A.gym, gymMin = Math.round((A.gymMin || 105) / 5) * 5, T = c.transition;
   var talk = A.talk ? { s: r10(A.talk.s), e: r10(A.talk.e) } : null;
 
   // Comida
@@ -654,9 +654,10 @@ function qGym() {
   askQ('¿Vas al gym ' + when() + '?', [{ label: 'Sí', value: true }, { label: 'No', value: false }], function (yes) {
     A.gym = yes; A.gymAnswered = true;
     if (yes) {
-      askQ('¿Cuánto dura la sesión ' + (A.isToday ? 'de hoy' : 'del ' + A.dayName) + '?', [60, 80, 90, 100, 120].map(function (m) {
-        return { label: dur(m), value: m, tag: m === 90 ? 'lo habitual' : null };
-      }), function (m) { A.gymMin = m; finish(); });
+      askQ('¿Vas solo?', [{ label: 'Sí', value: true }, { label: 'No', value: false }], function (solo) {
+        A.gymMin = solo ? 105 : 120;
+        finish();
+      });
     } else {
       finish();
     }
