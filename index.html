@@ -277,19 +277,20 @@ var dn10 = function (m) { return Math.floor(m / 10) * 10; };
 
 var DEF = {
   classEnd: 690, transition: 2, lunchStart: 840, lunchLatest: 900, lunchDur: 45,
-  digestion: 50, travelGym: 20, travelHome: 30, homeGym: 30, uniHome: 40, deadline: 1200, libClose: 1439, minBlock: 30
+  digestion: 50, travelGym: 20, homeGym: 2, uniHome: 40, deadline: 1200, libClose: 1439, minBlock: 30, lateEnd: 1080
 };
 
 function compute(A, cfg) {
-  var notes = [], warns = [];
+  var notes = [], warns = [], maxNoteIdx = -1;
   // Todo el plan va sobre la rejilla de 10 min. Los tiempos que limitan (trayectos, digestión) solo suben.
   var c = {
     classEnd: r10(cfg.classEnd), transition: r10(cfg.transition),
     lunchStart: r10(cfg.lunchStart), lunchLatest: r10(cfg.lunchLatest), lunchDur: r10(cfg.lunchDur),
-    digestion: up10(cfg.digestion), travelGym: up10(cfg.travelGym), travelHome: up10(cfg.travelHome),
-    homeGym: up10(cfg.homeGym == null ? cfg.travelHome : cfg.homeGym),
+    digestion: up10(cfg.digestion), travelGym: up10(cfg.travelGym),
+    gymH: r10(cfg.homeGym == null ? 2 : cfg.homeGym),
     homeMin: up10(cfg.uniHome == null ? 40 : cfg.uniHome),
-    deadline: cfg.deadline, libClose: dn10(cfg.libClose), minBlock: cfg.minBlock
+    deadline: cfg.deadline, libClose: dn10(cfg.libClose), minBlock: cfg.minBlock,
+    lateEnd: cfg.lateEnd == null ? 1080 : cfg.lateEnd
   };
   var gym = !!A.gym, gymMin = r10(A.gymMin || 90), T = c.transition;
   var talk = A.talk ? { s: r10(A.talk.s), e: r10(A.talk.e) } : null;
@@ -311,8 +312,8 @@ function compute(A, cfg) {
   var capA = segs.reduce(function (t, s) { return t + (s[1] - s[0]); }, 0);
 
   // Límite de estudio después de comer
-  var gymStartLatest = c.deadline - c.travelHome - gymMin;
-  var latestLeave = gym ? gymStartLatest - c.travelGym : c.deadline - c.homeMin;
+  // Gym de debajo de casa: salir de la uni, ir a casa (homeMin), bajar al gym y volver a subir
+  var latestLeave = gym ? c.deadline - c.homeMin - 2 * c.gymH - gymMin : c.deadline - c.homeMin;
   var capEnd = Math.min(latestLeave, c.libClose);
   var Bmax = Math.max(0, Math.floor((capEnd - LE) / 10) * 10);
   var Smax = capA + Bmax;
@@ -323,6 +324,7 @@ function compute(A, cfg) {
     : 'llegando a casa antes de las ' + fmt(c.deadline);
   if (A.hours === 'max') {
     notes.push('Máximo posible ' + limitTxt + ': ' + dur(Smax) + ' de biblioteca.');
+    maxNoteIdx = notes.length - 1;
   } else if (S > Smax) {
     warns.push('No cabe: ' + limitTxt + ', el máximo son ' + dur(Smax) + ' de biblioteca. Te he puesto eso en vez de ' + dur(S) + '.');
     S = Smax;
@@ -356,6 +358,24 @@ function compute(A, cfg) {
     }
   }
 
+  // Gym en medio: si sin el gym acabarías en la uni más tarde de lateEnd (18:00), el gym va entre dos bloques de estudio
+  var mid = false, gsM = null, dM = null, B1 = 0, noGymEnd = LE + B;
+  if (!homeLunch && gym && LE + B > c.lateEnd) {
+    mid = true;
+    gsM = Math.ceil((LE + c.digestion) / 10) * 10;
+    dM = gsM - c.travelGym;
+    B1 = Math.max(0, dM - LE);
+    var backM = gsM + gymMin + c.travelGym;
+    var endCapM = Math.min(c.deadline - c.homeMin, c.libClose);
+    var BmaxM = B1 + Math.max(0, Math.floor((endCapM - backM) / 10) * 10);
+    if (B > BmaxM) {
+      if (A.hours === 'max' && maxNoteIdx >= 0) notes[maxNoteIdx] = 'Máximo posible con el gym en medio y llegando a casa antes de las ' + fmt(c.deadline) + ': ' + dur(Aamt + BmaxM) + ' de biblioteca.';
+      else warns.push('No cabe con el gym en medio: el máximo son ' + dur(Aamt + BmaxM) + ' de biblioteca. Te he puesto eso en vez de ' + dur(S) + '.');
+      B = BmaxM; S = Aamt + B;
+    }
+    if (B - B1 < 10) mid = false;
+  }
+
   var arriveHome = null;
   if (homeLunch) {
     arriveHome = lastEnd + c.homeMin;
@@ -371,27 +391,38 @@ function compute(A, cfg) {
   if (talk) evs.push({ s: talk.s, e: talk.e, type: 'talk', label: 'Charla' });
   if (!homeLunch) evs.push({ s: LS, e: LE, type: 'meal', label: 'Comer en la uni' });
 
-  var home, gs = null, depart = null, studyEnd = LE + B;
+  var home, gs = null, depart = null, studyEnd = LE + B, homeFirst = null;
   if (homeLunch) {
     evs.push({ s: lastEnd, e: arriveHome, type: 'move', label: 'Ir a casa' });
     home = arriveHome;
   } else {
-    if (B > 0) evs.push({ s: LE, e: LE + B, type: 'study', label: 'Biblioteca' });
-    if (gym) {
-      gs = Math.ceil(Math.max(studyEnd + c.travelGym, LE + c.digestion) / 10) * 10;
-      if (gs > gymStartLatest) {
-        var alt = Math.max(studyEnd + c.travelGym, dn10(gymStartLatest));
-        if (alt < gs) warns.push('Entre comer y entrenar te quedan ' + dur(Math.max(0, alt - LE)) + ' en lugar de los ' + dur(c.digestion) + ' que necesitas.');
-        gs = alt;
-      }
-      depart = gs - c.travelGym;
+    if (mid) {
+      if (B1 > 0) evs.push({ s: LE, e: LE + B1, type: 'study', label: 'Biblioteca' });
+      gs = gsM; depart = dM;
       evs.push({ s: depart, e: gs, type: 'move', label: 'Ir al gym' });
       evs.push({ s: gs, e: gs + gymMin, type: 'gym', label: 'Gym', sub: 'Sesión de ' + dur(gymMin) });
-      home = gs + gymMin + c.travelHome;
-      evs.push({ s: gs + gymMin, e: home, type: 'move', label: 'Volver a casa' });
+      var back = gs + gymMin + c.travelGym;
+      evs.push({ s: gs + gymMin, e: back, type: 'move', label: 'Volver a la uni' });
+      evs.push({ s: back, e: back + (B - B1), type: 'study', label: 'Biblioteca' });
+      studyEnd = back + (B - B1);
+      home = studyEnd + c.homeMin;
+      evs.push({ s: studyEnd, e: home, type: 'move', label: 'Volver a casa' });
+    } else {
+    if (B > 0) evs.push({ s: LE, e: LE + B, type: 'study', label: 'Biblioteca' });
+    if (gym) {
+      // Primero a casa, luego al gym de debajo de casa
+      homeFirst = studyEnd + c.homeMin;
+      evs.push({ s: studyEnd, e: homeFirst, type: 'move', label: 'Ir a casa' });
+      gs = Math.ceil(Math.max(homeFirst + c.gymH, LE + c.digestion) / 10) * 10;
+      depart = gs - c.gymH;
+      if (c.gymH > 0) evs.push({ s: depart, e: gs, type: 'move', label: 'Bajar al gym' });
+      evs.push({ s: gs, e: gs + gymMin, type: 'gym', label: 'Gym', sub: 'Sesión de ' + dur(gymMin) });
+      home = gs + gymMin + c.gymH;
+      if (c.gymH > 0) evs.push({ s: gs + gymMin, e: home, type: 'move', label: 'Subir a casa' });
     } else {
       home = studyEnd + c.homeMin;
       evs.push({ s: studyEnd, e: home, type: 'move', label: 'Volver a casa' });
+    }
     }
   }
 
@@ -424,18 +455,19 @@ function compute(A, cfg) {
     else notes.push('Comes en la uni a las ' + fmt(LS) + ': con este estudio no llegas a casa a tiempo de comer allí.');
     if (B === 0) notes.push('Los ' + dur(S) + ' de estudio caben antes de comer, así que el bloque acaba justo cuando toca comer.');
     else if (Aamt === 0) notes.push('Todo el estudio (' + dur(S) + ') va después de comer.');
-    else notes.push('Antes de comer caben ' + dur(Aamt) + '. Los ' + dur(B) + ' restantes van después, mientras haces la digestión.');
+    else notes.push('Antes de comer caben ' + dur(Aamt) + '. Lo que queda (' + dur(B) + ') va después, mientras haces la digestión.');
     if (!talk && pieces.length && pieces[0][0] - T - c.classEnd >= 10) {
       notes.push('Al salir de clase tienes ' + dur(pieces[0][0] - T - c.classEnd) + ' de descanso; el estudio se pega a la hora de comer.');
     }
   }
   if (gym) {
-    if (homeLunch) {
-      notes.push('Sales de casa hacia el gym a las ' + fmt(depart) + ' y llegas a las ' + fmt(gs) + ', ' + dur(gs - LE) + ' después de terminar de comer (necesitas ' + dur(c.digestion) + ').');
-      notes.push('Los trayectos usan tu tiempo más largo (' + c.homeGym + ' min de casa al gym, ' + c.travelHome + ' de vuelta). Si tardas menos, llegas antes.');
+    if (mid) {
+      notes.push('Sin el gym acabarías en la uni a las ' + fmt(noGymEnd) + ', más tarde de las ' + fmt(c.lateEnd) + ', así que el gym va en medio.');
+      notes.push('Estudias ' + dur(B1) + ' tras comer, vas al gym (llegas a las ' + fmt(gs) + ', ' + dur(gs - LE) + ' después de comer, con ' + dur(c.digestion) + ' de digestión), vuelves a la uni y sigues con ' + dur(B - B1) + ' más.');
+      notes.push('Trayectos: ' + c.travelGym + ' min uni-gym, ' + c.travelGym + ' min gym-uni y ' + c.homeMin + ' min uni-casa.');
     } else {
-      notes.push('Llegas al gym a las ' + fmt(gs) + ', ' + dur(gs - LE) + ' después de terminar de comer (necesitas ' + dur(c.digestion) + ').');
-      notes.push('Los trayectos usan tu tiempo más largo (' + c.travelGym + ' min al gym, ' + c.travelHome + ' de vuelta). Si tardas menos, llegas antes.');
+      notes.push('Vas de la uni a casa (' + c.homeMin + ' min) y llegas a las ' + fmt(homeFirst) + '. Después bajas al gym de debajo de casa.');
+      notes.push('Empiezas el gym a las ' + fmt(gs) + ', ' + dur(gs - LE) + ' después de terminar de comer (necesitas ' + dur(c.digestion) + ').');
     }
   } else if (!homeLunch) {
     notes.push('Uni a casa: ' + c.homeMin + ' min' + '.');
@@ -443,20 +475,20 @@ function compute(A, cfg) {
   notes.push('Todas las horas y duraciones van redondeadas a 10 min.');
   if (gym || !homeLunch) {
     if (margin > 0) {
-      notes.push('Llegas a casa a las ' + fmt(home) + ', ' + dur(margin) + ' antes de las ' + fmt(c.deadline) + '.' + (gym ? ' Si el gym se alarga, tienes ese margen.' : ''));
+      notes.push((gym && homeFirst ? 'Acabas el gym a las ' : 'Llegas a casa a las ') + fmt(home) + ', ' + dur(margin) + ' antes de las ' + fmt(c.deadline) + '.' + (gym ? ' Si el gym se alarga, tienes ese margen.' : ''));
     } else if (margin === 0) {
-      notes.push('Llegas justo a las ' + fmt(home) + ', sin margen.');
+      notes.push((gym && homeFirst ? 'Acabas el gym justo a las ' : 'Llegas justo a las ') + fmt(home) + ', sin margen.');
     }
   }
 
-  return { evs: full, home: home, S: S, gym: gym, gymMin: gymMin, notes: notes, warns: warns, margin: margin,
+  return { evs: full, home: home, homeFirst: homeFirst, gymAtHome: !!(gym && homeFirst), S: S, gym: gym, gymMin: gymMin, notes: notes, warns: warns, margin: margin,
            homeLunch: homeLunch, planEnd: planEnd,
            start: c.classEnd, end: homeLunch ? planEnd : Math.max(planEnd, c.deadline), deadline: homeLunch ? planEnd : c.deadline };
 }
 // END LOGIC
 
 
-var KEY = 'plan-dia-cfg-v5';
+var KEY = 'plan-dia-cfg-v6';
 function loadCfg() {
   var c = Object.assign({}, DEF);
   try {
@@ -712,8 +744,8 @@ function renderPlan(r) {
   card.setAttribute('aria-label', 'Plan del día');
   var head = mk('div', 'plan-head');
   head.appendChild(mk('p', 'kicker', A.dayLabel));
-  head.appendChild(mk('h2', null, 'Llegas a casa a las ' + fmt(r.home)));
-  head.appendChild(mk('p', 'meta', 'Biblioteca ' + dur(r.S) + (r.homeLunch ? ' · Comes en casa' : ' · ' + (r.gym ? 'Gym ' + dur(r.gymMin) : 'Sin gym'))));
+  head.appendChild(mk('h2', null, 'Llegas a casa a las ' + fmt(r.gymAtHome ? r.homeFirst : r.home)));
+  head.appendChild(mk('p', 'meta', 'Biblioteca ' + dur(r.S) + (r.homeLunch ? ' · Comes en casa' : ' · ' + (r.gym ? 'Gym ' + dur(r.gymMin) + (r.gymAtHome ? ' · Acabas a las ' + fmt(r.home) : '') : 'Sin gym'))));
   card.appendChild(head);
   if (r.warns.length) {
     var w = mk('div', 'warns'); w.setAttribute('role', 'status');
@@ -767,11 +799,11 @@ var FIELDS = [
   { k: 'lunchDur', label: 'Duración de la comida', type: 'min' },
   { k: 'digestion', label: 'Digestión antes del gym', type: 'min' },
   { k: 'travelGym', label: 'Uni al gym', hint: 'Peor caso', type: 'min' },
-  { k: 'travelHome', label: 'Gym a casa', hint: 'Peor caso', type: 'min' },
-  { k: 'homeGym', label: 'Casa al gym', hint: 'Peor caso', type: 'min' },
+  { k: 'homeGym', label: 'Casa al gym de debajo de casa', hint: 'Cada trayecto', type: 'min' },
   { k: 'uniHome', label: 'Uni a casa', type: 'min' },
   { k: 'deadline', label: 'En casa como tarde', type: 'time' },
-  { k: 'libClose', label: 'Cierre de la biblioteca', hint: '23:59 = sin límite', type: 'time' }
+  { k: 'libClose', label: 'Cierre de la biblioteca', hint: '23:59 = sin límite', type: 'time' },
+  { k: 'lateEnd', label: 'Gym en medio si acabas después de', type: 'time' }
 ];
 var grid = document.getElementById('cfg-grid');
 FIELDS.forEach(function (f) {
