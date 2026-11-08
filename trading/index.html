@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0B0D10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Trading">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="description" content="Calendario personal de trading: registra cada operación y ve tu resultado mensual.">
+  <title>Calendario de trading</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-in">
+      <button type="button" class="icon-btn" id="prev" aria-label="Mes anterior">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h1 class="month-title" id="month-title" aria-live="polite"></h1>
+      <button type="button" class="icon-btn" id="next" aria-label="Mes siguiente">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="spacer"></span>
+      <button type="button" class="text-btn" id="today">Hoy</button>
+    </div>
+  </header>
+
+  <main class="page">
+
+    <section class="card summary" aria-labelledby="sum-label">
+      <p class="sum-label" id="sum-label">Resultado neto del mes</p>
+      <p class="sum-net" id="sum-net">$0,00</p>
+      <div class="ratio" id="ratio" aria-hidden="true">
+        <span class="ratio-g" id="ratio-g"></span>
+        <span class="ratio-r" id="ratio-r"></span>
+      </div>
+      <dl class="stats">
+        <div class="stat s3"><dt>Operaciones</dt><dd id="st-count">0</dd></div>
+        <div class="stat s3"><dt>Aciertos</dt><dd id="st-winrate">—</dd></div>
+        <div class="stat s3"><dt>Días V / R</dt><dd id="st-days">—</dd></div>
+        <div class="stat s2"><dt>Mejor día</dt><dd id="st-best">—</dd></div>
+        <div class="stat s2"><dt>Peor día</dt><dd id="st-worst">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="calendar" id="calendar" aria-label="Calendario">
+      <div class="weekdays" aria-hidden="true">
+        <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+      </div>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <section class="card backup" aria-labelledby="backup-title">
+      <h2 class="backup-title" id="backup-title">Copia de seguridad</h2>
+      <p class="backup-note">Tus operaciones se guardan solo en este dispositivo. iOS puede borrar los datos de la app si pasa tiempo sin abrirla, así que exporta una copia de vez en cuando.</p>
+      <div class="backup-actions">
+        <button type="button" class="btn-secondary" id="export-btn">Exportar JSON</button>
+        <button type="button" class="btn-secondary" id="import-btn">Importar JSON</button>
+      </div>
+      <p class="backup-last" id="backup-last"></p>
+      <input type="file" id="import-file" accept="application/json,.json" hidden>
+    </section>
+
+  </main>
+
+  <!-- Hoja inferior -->
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-hidden="true">
+
+    <div class="view" id="view-list">
+      <div class="sheet-head drag-zone">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="head-row">
+          <div class="head-text">
+            <h2 class="sheet-title" id="sheet-title"></h2>
+            <p class="sheet-sub" id="sheet-sub"></p>
+          </div>
+          <button type="button" class="text-btn" id="sheet-close">Cerrar</button>
+        </div>
+      </div>
+      <div class="sheet-body">
+        <ul class="trades" id="trades"></ul>
+        <p class="empty-msg" id="empty-msg" hidden>Sin operaciones este día.</p>
+        <button type="button" class="btn-primary" id="add-btn">Añadir operación</button>
+      </div>
+    </div>
+
+    <form class="view" id="view-form" novalidate hidden>
+      <div class="sheet-head drag-zone">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="form-head">
+          <button type="button" class="text-btn" id="form-cancel">Cancelar</button>
+          <h2 class="sheet-title center" id="form-title">Nueva operación</h2>
+          <button type="submit" class="text-btn strong" id="form-save">Guardar</button>
+        </div>
+      </div>
+      <div class="sheet-body" id="form-body">
+
+        <div class="field">
+          <label for="f-asset">Activo</label>
+          <input class="input" id="f-asset" name="asset" type="text" list="asset-list" maxlength="24"
+                 placeholder="NQ, ES, AAPL…" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false"
+                 aria-describedby="err-asset">
+          <datalist id="asset-list"></datalist>
+          <p class="err" id="err-asset" hidden></p>
+        </div>
+
+        <div class="field">
+          <span class="label" id="lbl-result">Resultado</span>
+          <div class="seg" role="group" aria-labelledby="lbl-result">
+            <button type="button" class="seg-btn" id="kind-win" data-kind="win" aria-pressed="true">Ganancia</button>
+            <button type="button" class="seg-btn" id="kind-loss" data-kind="loss" aria-pressed="false">Pérdida</button>
+          </div>
+          <div class="money-input">
+            <span class="money-prefix" aria-hidden="true">$</span>
+            <input class="input" id="f-amount" name="amount" type="text" inputmode="decimal" placeholder="0,00"
+                   autocomplete="off" aria-label="Importe en dólares" aria-describedby="err-amount">
+          </div>
+          <p class="err" id="err-amount" hidden></p>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="f-entry">Entrada <span class="opt">opcional</span></label>
+            <input class="input" id="f-entry" name="entry" type="text" inputmode="decimal" autocomplete="off" aria-describedby="err-entry">
+            <p class="err" id="err-entry" hidden></p>
+          </div>
+          <div class="field">
+            <label for="f-exit">Salida <span class="opt">opcional</span></label>
+            <input class="input" id="f-exit" name="exit" type="text" inputmode="decimal" autocomplete="off" aria-describedby="err-exit">
+            <p class="err" id="err-exit" hidden></p>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="f-note">Nota <span class="opt">opcional</span></label>
+          <textarea class="input textarea" id="f-note" name="note" rows="2" maxlength="1000" placeholder="Setup, errores, sensaciones…"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="f-date">Fecha</label>
+          <input class="input" id="f-date" name="date" type="date" aria-describedby="err-date">
+          <p class="err" id="err-date" hidden></p>
+        </div>
+
+        <button type="button" class="btn-danger" id="delete-btn" hidden>Eliminar operación</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Diálogo de confirmación -->
+  <div class="dialog" id="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-msg" hidden>
+    <div class="dialog-box">
+      <div class="dialog-text">
+        <p class="dialog-title" id="dialog-title"></p>
+        <p class="dialog-msg" id="dialog-msg"></p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="dialog-btn" id="dialog-cancel">Cancelar</button>
+        <button type="button" class="dialog-btn strong" id="dialog-ok">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
